@@ -12,17 +12,17 @@ flag_downscale_movie: True # [bool] downscale the movie to increase computation 
 downscaling: 3 # [int] dowscaling factor
 
 # Current estimation
-num_pixels: 128 # number of pixels to consider for one current estimation
-accuracy: 0.01 
-ulim: [-0.5,.5]
-vlim: [-0.5,.5]
-du: .1
-dv: .1
-norm: False
-w0: .6
-w1: .9
-ub: 0.
-vb: 0.
+num_pixels: 128 # [int] number of pixels to consider for one current estimation
+accuracy: 0.01  # [float] accuracy of the estimated current velocities (in m/s)
+ulim: [-1,1] # [list] Range of u-component in which the optimization is performed (in m/s)
+vlim: [-1,1] # [list] Range of v-component in which the optimization is performed (in m/s)
+du: .1 # [float] initial step to optimize a first estimate of the u-component (in m/s)
+dv: .1 # [float] initial step to optimize a first estimate of the u-component (in m/s)
+norm: False # [bool] normalize the spectra
+w0: .6 # [float] lower bound of the time frequency (in Hz)
+w1: .9 # [float] upper bound of the time frequency (in Hz)
+ub: 0. # [float] u-component first guess (in m/s)
+vb: 0. # [float] v-component first guess (in m/s)
 
 # Parallelization
-num_threads: 16
+num_threads: 16 # [int] number of threads to run in parallel (set the maximum, the computations are quiet long!)
