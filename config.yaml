@@ -1,0 +1,28 @@
+# Path, directories
+path_movie: data/current_observation.mp4 # [str] path of the input movie (must be a mp4 file)
+dir_tmp: scratch # [str] temporary directory to save temporary files
+dir_out: output # [str] output directory
+file_out: currents.nc # [str] output netcdf filename 
+
+# Preprocessing
+resolution_movie: 0.0342 # [float] movie pixel size (in meter)
+fps: 10 # [int] number of frame per seconds to extract
+band: 0 # [int] RGB band to select (1, 2 or 3)
+flag_downscale_movie: True # [bool] downscale the movie to increase computation time
+downscaling: 3 # [int] dowscaling factor
+
+# Current estimation
+num_pixels: 128 # number of pixels to consider for one current estimation
+accuracy: 0.01 
+ulim: [-0.5,.5]
+vlim: [-0.5,.5]
+du: .1
+dv: .1
+norm: False
+w0: .6
+w1: .9
+ub: 0.
+vb: 0.
+
+# Parallelization
+num_threads: 16

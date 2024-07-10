@@ -1,0 +1,11 @@
+channels:
+  - conda-forge
+dependencies: 
+- jupyter=1.0.0
+- matplotlib
+- netcdf4
+- numpy
+- python=3.9.19
+- scipy=1.13.1
+- xarray
+- xrft
