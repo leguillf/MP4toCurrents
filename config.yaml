@@ -1,28 +1,38 @@
 # Path, directories
-path_movie: data/current_observation.mp4 # [str] path of the input movie (must be a mp4 file)
+date: 2025-05-31
+name_movie: DJI_0606.MOV
+dir_movie: /Users/florian/Work/DRONE/ # [str] path of the input movie (must be a mp4 file)
 dir_tmp: scratch # [str] temporary directory to save temporary files
 dir_out: output # [str] output directory
-file_out: currents.nc # [str] output netcdf filename 
+file_out: currents_no-norm.nc # [str] output netcdf filename 
 
 # Preprocessing
-resolution_movie: 0.0342 # [float] movie pixel size (in meter)
+altitude: 506 #499.200 # [float] drone's altitude [m] # 499.200
+alpha: 0.00028640000386558187 # 
+# First drone:  0.0003641836885252476
+# Second drone: 0.00028640000386558187
 fps: 10 # [int] number of frame per seconds to extract
 band: 0 # [int] RGB band to select (1, 2 or 3)
 flag_downscale_movie: True # [bool] downscale the movie to increase computation time
 downscaling: 3 # [int] dowscaling factor
+xmin: 0 # [float] minimum x-coordinate of the region of interest 
+xmax: -1 # [float] maximum x-coordinate of the region of interest
+ymin: 0 # [float] minimum y-coordinate of the region of interest
+ymax: -1 # [float] maximum y-coordinate of the region of interest
 
 # Current estimation
-num_pixels: 128 # [int] number of pixels to consider for one current estimation
+num_pixels: 128 # 1024 # # 256 # [int] number of pixels to consider for one current estimation
+num_times: None
 accuracy: 0.01  # [float] accuracy of the estimated current velocities (in m/s)
-ulim: [-1,1] # [list] Range of u-component in which the optimization is performed (in m/s)
-vlim: [-1,1] # [list] Range of v-component in which the optimization is performed (in m/s)
+ulim: [-0.5,0.5] # [list] Range of u-component in which the optimization is performed (in m/s)
+vlim: [-0.5,0.5] # [list] Range of v-component in which the optimization is performed (in m/s)
 du: .1 # [float] initial step to optimize a first estimate of the u-component (in m/s)
 dv: .1 # [float] initial step to optimize a first estimate of the u-component (in m/s)
-norm: False # [bool] normalize the spectra
-w0: .6 # [float] lower bound of the time frequency (in Hz)
-w1: .9 # [float] upper bound of the time frequency (in Hz)
+norm: True # [bool] normalize the spectra
+w0: .3 # [float] lower bound of the time frequency (in Hz)
+w1: 1. # [float] upper bound of the time frequency (in Hz)
 ub: 0. # [float] u-component first guess (in m/s)
 vb: 0. # [float] v-component first guess (in m/s)
 
 # Parallelization
-num_threads: 16 # [int] number of threads to run in parallel (set the maximum, the computations are quiet long!)
+num_threads: 7 # [int] number of threads to run in parallel (set the maximum, the computations are quiet long!)

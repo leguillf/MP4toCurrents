@@ -6,13 +6,15 @@ import matplotlib
 import matplotlib.pyplot as plt 
 import xrft
 import multiprocessing
+import gc
 import warnings
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import imageio
+
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
-
-# Use 'Agg' backend for matplotlib
-matplotlib.use('Agg')
 
 from .utils import shared_array
 
@@ -144,31 +146,34 @@ def J(psd, w, kx, ky, k2d, kx2d, ky2d, u, v):
     Returns:
     - res: float, cost function value.
     """
-    g = 9.81
-    res = 0
-    for iw in range(psd.shape[0]):
-        disp_uv = np.sqrt(g * k2d) + kx2d * u + ky2d * v
-        cs = plt.contour(kx, ky, disp_uv, [w[iw]])
-        plt.close()
-        collections = cs.collections[0].get_paths()
 
+    g = 9.81 # gravitational acceleration
+    res = 0 # Initialize cost function value
+
+    # Iterate over the frequencies
+    for iw in range(psd.shape[0]):
+        # Compute the dispersion relation
+        disp_uv = np.sqrt(g * k2d) - kx2d * u - ky2d * v
+        # Find the indices of the frequencies that are close to the dispersion relation
+        w0 = w[iw]
+        wmin = (w0 + w[iw-1]) / 2 if iw > 0 else 0
+        wmax = (w0 + w[iw+1]) / 2 if iw < psd.shape[0] - 1 else np.inf
+        indices = (disp_uv>=wmin) & (disp_uv<wmax) 
+        # Extract the corresponding coordinates from kx2d and ky2d
+        x_contour = kx2d[indices]
+        y_contour = ky2d[indices]
+        # Extract the corresponding PSD values
         psd1d = psd[iw].values.ravel()
-        idx = psd1d > 0.1 * np.nanmax(psd1d)
+        # Filter the PSD values and coordinates to only include those above a certain threshold
+        idx = psd1d > 0.1 * np.nanmax(psd1d) 
         psd1d = psd1d[idx]
         coords1d = np.vstack((kx2d.ravel()[idx], ky2d.ravel()[idx])).T
-        kxmin = kx2d.ravel()[idx].min()
-        kxmax = kx2d.ravel()[idx].max()
-        kymin = ky2d.ravel()[idx].min()
-        kymax = ky2d.ravel()[idx].max()
-        for p1 in collections:
-            coor_p1 = p1.vertices
-            coor_p1[:, 0][(coor_p1[:, 0] < kxmin) | (coor_p1[:, 0] > kxmax)] = np.nan
-            coor_p1[:, 1][(coor_p1[:, 1] < kymin) | (coor_p1[:, 1] > kymax)] = np.nan
-            isNaN = np.isnan(coor_p1.sum(axis=1))
-            coor_p1 = coor_p1[~isNaN]
-            psd_interp = interp(coords1d, psd1d, coor_p1, dmin=kx[1] - kx[0])
-            res += psd_interp.sum()
-    
+        # Interpolate the PSD values onto the contour coordinates
+        coords = np.vstack((x_contour, y_contour)).T
+        psd_interp = interp(coords1d, psd1d, coords, nnear=6, dmin=kx[1] - kx[0])
+        # Compute the cost function value
+        res += psd_interp.sum()
+ 
     return res
 
 def get_newdu(du, accuracy):
@@ -184,14 +189,13 @@ def get_newdu(du, accuracy):
     """
     return max(du / 10, accuracy)
 
-def compute_uv_bin(ds, ib, jb, bin_y, bin_x, bin_y_step, bin_x_step, umap=None, vmap=None, Jmap=None, ulim=[-2, 2], vlim=[-2, 2], w0=0.5, w1=1.0, du=0.1, dv=0.1, accuracy=0.01, norm=True, Print=False):
+def compute_uv_bin(da_psd, c, umap=None, vmap=None, Jmap=None, ulim=[-2, 2], vlim=[-2, 2], w0=0.5, w1=1.0, du=0.1, dv=0.1, accuracy=0.01, norm=True, name_save='', Print=False):
     """
     Compute the velocity components u and v for a specific bin of the dataset.
 
     Parameters:
     - ds: xarray.Dataset, input dataset.
-    - ib: int, bin index in y-direction.
-    - jb: int, bin index in x-direction.
+    - c: int, bin index in y-direction.
     - bin_y: numpy.ndarray, y-axis bin centers.
     - bin_x: numpy.ndarray, x-axis bin centers.
     - bin_y_step: float, bin step size in y-direction.
@@ -212,15 +216,7 @@ def compute_uv_bin(ds, ib, jb, bin_y, bin_x, bin_y_step, bin_x_step, umap=None, 
     Returns:
     - None or (u0, v0): computed velocity components.
     """
-    # Select data for the current bin
-    ds_bin = ds.sel({
-        'x': slice(bin_x[jb] - bin_x_step / 2, bin_x[jb] + bin_x_step / 2),
-        'y': slice(bin_y[ib] - bin_y_step / 2, bin_y[ib] + bin_y_step / 2)
-    }).copy().load()
-
-    # Compute PSD
-    da_psd = spec_3d(ds_bin.data, w0, w1)
-
+    
     # Get space/time frequencies
     w = da_psd.freq_t.values * 2 * np.pi
     kx = da_psd.freq_x.values * 2 * np.pi
@@ -229,7 +225,7 @@ def compute_uv_bin(ds, ib, jb, bin_y, bin_x, bin_y_step, bin_x_step, umap=None, 
     k2d = np.sqrt(kx2d**2 + ky2d**2)
 
     # Normalize PSD
-    psd = da_psd.copy()
+    psd = da_psd.copy().load()
     if norm:
         psd.data = normalize(da_psd.values, kx, ky)
 
@@ -270,17 +266,44 @@ def compute_uv_bin(ds, ib, jb, bin_y, bin_x, bin_y_step, bin_x_step, umap=None, 
                 u0, v0 = u, v
                 J0 = Jtest
 
+    # Plot results
+    fig, ax = plt.subplots()
+    def update(iw):
+        ax.clear()
+        w0 = w[iw]
+        disp_uv = np.sqrt(9.81 * k2d) - kx2d * u0 - ky2d * v0
+        mesh = ax.pcolormesh(kx2d, ky2d, psd[iw], cmap='Reds', shading='auto')
+
+        # Draw contour
+        contour = ax.contour(kx2d, ky2d, disp_uv, levels=[w0], colors='black')
+        
+        # Create dummy line for legend
+        dummy_line = plt.Line2D([], [], color='black', label=f'u = {u0:.2f}m/s, v = {v0:.2f}m/s')
+        
+        ax.legend(handles=[dummy_line], loc='upper right')
+        ax.set_xlim(-5, 5)
+        ax.set_ylim(-5, 5)
+        ax.set_xlabel('kx (m-1)')
+        ax.set_ylabel('ky (m-1)')
+        ax.set_title(f'w = {w0/(2*np.pi):.2f} s-1')
+    # Create animation
+    anim = FuncAnimation(fig, update, frames=len(w), interval=200)
+    # Save animation to GIF using Pillow (requires `pillow` package)
+    anim.save(f'{name_save}_{u0:.2f}_{v0:.2f}.gif', writer='pillow', fps=5)
+
     # Store results
     if Jmap is not None:
-        Jmap[ib, jb] = J0
+        Jmap[c] = J0
+    
+    print('(u = {:.2f}, v = {:.2f}) | J = {:.2E}'.format(u0, v0, J0))
 
     if umap is not None and vmap is not None:
-        umap[ib, jb] = u0
-        vmap[ib, jb] = v0
+        umap[c] = u0
+        vmap[c] = v0
     else:
         return u0, v0
 
-def run_current_estimation(path_in, num_pixels, ulim, vlim, du, dv, accuracy, w0, w1, num_threads, norm, path_out):
+def run_current_estimation(path_in, num_pixels, num_times, ulim, vlim, du, dv, accuracy, w0, w1, num_threads, norm, dir_out, file_out):
     """
     Run the current estimation process on the input dataset.
 
@@ -306,35 +329,64 @@ def run_current_estimation(path_in, num_pixels, ulim, vlim, du, dv, accuracy, w0
     t = ds.t.values
     x = ds.x.values
     y = ds.y.values
-    dx = x[1] - x[0]
-    dy = y[1] - y[0]
 
     # Create grid for current maps
-    bin_x_step = num_pixels * (x[1] - x[0])
-    bin_y_step = num_pixels * (y[1] - y[0])
-    bin_x = np.arange(0, x.max() - bin_x_step / 2 + dx, bin_x_step / 2)
+    if num_pixels is None:
+        bin_x_step = x[-1] - x[0]
+        bin_y_step = y[-1] - y[0]
+    else:
+        bin_x_step = (x[1] - x[0]) * num_pixels
+        bin_y_step = (y[1] - y[0]) * num_pixels
+    if num_times is None:
+        bin_t_step = t[-1] - t[0]
+    else:
+        bin_t_step = (t[1] - t[0]) * num_times
+
+    
+    bin_x = np.arange(0, x.max(), bin_x_step / 2)
     bin_x = np.concatenate((-bin_x[::-1], bin_x[1:]))
-    bin_y = np.arange(0, y.max() - bin_y_step / 2 + dy, bin_y_step / 2)
+    bin_y = np.arange(0, y.max(), bin_y_step / 2)
     bin_y = np.concatenate((-bin_y[::-1], bin_y[1:]))
+    if bin_x[-1] + bin_x_step / 2 > x.max():
+        bin_x[-1] = x.max() - bin_x_step/2
+    if bin_y[-1] + bin_y_step / 2 > y.max():
+        bin_y[-1] = y.max() - bin_y_step/2
+    bin_t = np.arange(bin_t_step / 2, t.max(), bin_t_step / 2)
 
     # Initialize mapped u & v    
-    umap = shared_array((bin_y.size, bin_x.size))
-    vmap = shared_array((bin_y.size, bin_x.size))
-    Jmap = shared_array((bin_y.size, bin_x.size))
+    print('Shape:', (bin_t.size, bin_y.size, bin_x.size))
+    umap = shared_array((bin_t.size, bin_y.size, bin_x.size))
+    vmap = shared_array((bin_t.size, bin_y.size, bin_x.size))
+    Jmap = shared_array((bin_t.size, bin_y.size, bin_x.size))
 
     # Create jobs for parallel processing
     jobs = []
-    for ib in range(bin_y.size):
-        for jb in range(bin_x.size):
-            jobs.append(multiprocessing.Process(target=compute_uv_bin, args=(ds, ib, jb, bin_y, bin_x, bin_y_step, bin_x_step, umap, vmap, Jmap, ulim, vlim, w0, w1, du, dv, accuracy, norm)))
-            if len(jobs) == num_threads:
-                # Start jobs
-                for job in jobs:
-                    job.start()
-                # Join jobs
-                for job in jobs:
-                    job.join()
-                jobs = []
+    c = -1
+    for tb in range(bin_t.size):
+        for ib in range(bin_y.size):
+            for jb in range(bin_x.size):
+                c += 1
+                # Select data for the current bin
+                ds_bin = ds.sel({
+                    'x': slice(bin_x[jb] - bin_x_step / 2, bin_x[jb] + bin_x_step / 2),
+                    'y': slice(bin_y[ib] - bin_y_step / 2, bin_y[ib] + bin_y_step / 2),
+                    't': slice(bin_t[tb] - bin_t_step / 2, bin_t[tb] + bin_t_step / 2)
+                }).copy()
+
+                # Compute PSD
+                da_psd = spec_3d(ds_bin.data, w0, w1).load()
+                jobs.append(multiprocessing.Process(target=compute_uv_bin, args=(da_psd, c, 
+                                                                                 umap, vmap, Jmap, 
+                                                                                 ulim, vlim, w0, w1, du, dv, accuracy, norm, 
+                                                                                 f'{dir_out}/anim_{tb}_{ib}_{jb}')))
+                if len(jobs) == num_threads:
+                    # Start jobs
+                    for job in jobs:
+                        job.start()
+                    # Join jobs
+                    for job in jobs:
+                        job.join()
+                    jobs = []
     if len(jobs) > 0:
         # Start remaining jobs
         for job in jobs:
@@ -342,15 +394,19 @@ def run_current_estimation(path_in, num_pixels, ulim, vlim, du, dv, accuracy, w0
         # Join remaining jobs
         for job in jobs:
             job.join()
+    
+    umap = np.asarray(umap.get_obj()).reshape((bin_t.size, bin_y.size, bin_x.size))
+    vmap = np.asarray(vmap.get_obj()).reshape((bin_t.size, bin_y.size, bin_x.size))
+    Jmap = np.asarray(Jmap.get_obj()).reshape((bin_t.size, bin_y.size, bin_x.size))
 
     # Write output to netCDF file
     dsout = xr.Dataset(
         {
-            'u': (('y', 'x'), umap),
-            'v': (('y', 'x'), vmap),
-            'J': (('y', 'x'), Jmap)
+            'u': (('t', 'y', 'x'), umap),
+            'v': (('t', 'y', 'x'), vmap),
+            'J': (('t', 'y', 'x'), Jmap)
         },
-        coords={'x': ('x', bin_x), 'y': ('y', bin_y)}
+        coords={'x': ('x', bin_x), 'y': ('y', bin_y), 't': ('t', bin_t)}
     )
-    dsout.to_netcdf(path_out)
+    dsout.to_netcdf(f'{dir_out}/{file_out}')
     dsout.close()

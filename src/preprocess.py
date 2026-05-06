@@ -4,11 +4,13 @@ import numpy as np
 import scipy.fftpack as fp
 from matplotlib.image import imread
 from scipy.signal import convolve2d
-import multiprocessing
+import multiprocessing as mp
 import os 
 import xarray as xr 
+from functools import partial
+import matplotlib.pyplot as plt
 
-from .utils import shared_array, gaspari_cohn
+from .utils import gaspari_cohn
 
 
 def MP4toPNG(input_file, output_pattern, fps):
@@ -21,7 +23,7 @@ def MP4toPNG(input_file, output_pattern, fps):
     fps (int): Frames per second for extracting frames.
     """
     # Extract PNG frames from MP4 using ffmpeg
-    command = f"ffmpeg -i {input_file} -vf fps={fps} {output_pattern}_%d.png"
+    command = f"ffmpeg -i {input_file} -pix_fmt yuv420p -vf fps={fps} {output_pattern}_%d.png"
     _ = subprocess.run(command.split(' '), stdout=subprocess.PIPE)
     
     # Rename files to be sorted in alphabetical order
@@ -86,7 +88,7 @@ def low_pass(data, ground_spacing, cutoff):
 
     return data_ls
 
-def process(file, i, band, flag_downscale_movie, downscaling, resolution, cutoff, output_arr):
+def process(file, i, band, flag_downscale_movie, downscaling, resolution, cutoff, xmin, xmax, ymin, ymax, output_arr):
     """
     Process a single image file.
     
@@ -100,8 +102,8 @@ def process(file, i, band, flag_downscale_movie, downscaling, resolution, cutoff
     cutoff (float): Cutoff frequency for the low-pass filter.
     output_arr (multiprocessing.Array): Shared array to store the output.
     """
-    
-    img = imread(file)[::-1, :, band]  # Reverse y-axis to make it ascendant
+
+    img = imread(file)[ymin:ymax, xmin:xmax, band][::-1] # Reverse y-axis to make it ascendant
 
     # Downscaling
     if flag_downscale_movie:
@@ -117,7 +119,8 @@ def process(file, i, band, flag_downscale_movie, downscaling, resolution, cutoff
     # Fill output array
     output_arr[i, :, :] = img_corr[1:-1, 1:-1]
 
-def run_preprocess(files_pattern, band, flag_downscale_movie, downscaling, resolution_movie, num_threads, fps, dir_out):
+def run_preprocess(files_pattern, band, flag_downscale_movie, downscaling, resolution_movie, num_threads, fps, dir_out,
+                   xmin, xmax, ymin, ymax):
     """
     Run preprocessing on a set of image files.
     
@@ -137,14 +140,14 @@ def run_preprocess(files_pattern, band, flag_downscale_movie, downscaling, resol
 
     # Define ground grid
     file = files_in[0]
-    img = imread(file)[::-1, :, band]  # Reverse y-axis to make it ascendant
+    img = imread(file)[ymin:ymax, xmin:xmax, band][::-1] # Reverse y-axis to make it ascendant
     if flag_downscale_movie:
         img_down = convolve2d(img, np.ones((downscaling, downscaling)) / downscaling ** 2)
         img_down = img_down[::downscaling, ::downscaling]
     else:
         img_down = +img
-    y_img = np.arange(-downscaling * img_down.shape[0] / 2, downscaling * img_down.shape[0] / 2, downscaling)
-    x_img = np.arange(-downscaling * img_down.shape[1] / 2, downscaling * img_down.shape[1] / 2, downscaling)
+    y_img = np.arange(-downscaling * img_down.shape[0] / 2 + downscaling/2, downscaling * img_down.shape[0] / 2 + downscaling/2, downscaling)
+    x_img = np.arange(-downscaling * img_down.shape[1] / 2 + downscaling/2, downscaling * img_down.shape[1] / 2 + downscaling/2, downscaling)
     x_grnd = resolution_movie * x_img[1:-1]
     y_grnd = resolution_movie * y_img[1:-1]
     resolution = x_grnd[1] - x_grnd[0]
@@ -154,28 +157,21 @@ def run_preprocess(files_pattern, band, flag_downscale_movie, downscaling, resol
     while 2 * Nx <= x_grnd.size:
         Nx *= 2
     cutoff = min(Ny, Nx) * resolution / 2
-    output_arr = shared_array([nt, y_grnd.size, x_grnd.size])
+    output_arr = np.zeros([nt, y_grnd.size, x_grnd.size])
 
     # Run preprocessing
-    jobs = []
-    for i, file in enumerate(files_in):
-        jobs.append(multiprocessing.Process(target=process, args=(file, i, band, flag_downscale_movie, downscaling, resolution, cutoff, output_arr)))
-        if len(jobs) == num_threads:
-            # Start jobs
-            for job in jobs:
-                job.start()
-            # Join jobs
-            for job in jobs:
-                job.join()
-            jobs = []
-    if len(jobs) > 0:
-        # Start jobs
-        for job in jobs:
-            job.start()
-        # Join jobs
-        for job in jobs:
-            job.join()
+    worker = partial(process, band=band, flag_downscale_movie=flag_downscale_movie, downscaling=downscaling, resolution=resolution, cutoff=cutoff, 
+                     xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,  output_arr=output_arr)
 
+    #with mp.get_context("spawn").Pool(processes=num_threads) as pool:
+    #        pool.starmap(
+    #            worker,
+    #            [(file, i) for i, file in enumerate(files_in)]
+    #        )
+
+    for i, file in enumerate(files_in): 
+        worker(file, i)
+        
     # Remove time mean
     mean_arr = output_arr.mean(axis=0)
     output_arr -= mean_arr

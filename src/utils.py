@@ -14,13 +14,13 @@ def shared_array(shape):
     """
     
     # Create a shared array in memory with the given shape and type double (c_double)
-    shared_array_base = multiprocessing.Array(ctypes.c_double, int(np.prod(shape)))
+    shared_array_base = multiprocessing.Array(ctypes.c_double, int(np.prod(shape)), lock=True)
     
     # Convert the shared array to a numpy array
-    shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+    #shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
     
     # Reshape the numpy array to the specified shape
-    shared_array = shared_array.reshape(*shape)
+    shared_array = shared_array_base#.reshape(*shape)
     
     return shared_array
 
